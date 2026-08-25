@@ -2,10 +2,10 @@
 
 // --- PIN CONFIGURATION ---
 // Romeo BLE Built-in Motor Driver Pins
-const int E1 = 5;     // M1 Speed Control (Left Motors)
-const int M1 = 4;     // M1 Direction Control
-const int E2 = 6;     // M2 Speed Control (Right Motors)
-const int M2 = 7;     // M2 Direction Control
+const int E1 = 6;     // M1 Speed Control (Left Motors)
+const int M1 = 7;     // M1 Direction Control
+const int E2 = 5;     // M2 Speed Control (Right Motors)
+const int M2 = 4;     // M2 Direction Control
 
 // Peripheral Component Pins
 const int triggerPin = 9; // Connected to URM37 COMP/TRIG
@@ -19,7 +19,7 @@ uint16_t sensorValues[SensorCount];
 // --- CALIBRATION & THRESHOLDS ---
 const int LINE_THRESHOLD = 750;  // Analog values > 500 mean black line
 const int BASE_SPEED = 180;      // Base motor speed (0-255)
-const int TURN_SPEED = 255;       // Speed during sharp pivot turns
+const int TURN_SPEED = 200;       // Speed during sharp pivot turns
 const int PROXIMITY_LIMIT = 20;  // Stop distance in centimeters
 
 // Robot System States
