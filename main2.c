@@ -113,7 +113,7 @@ void loop() {
         // 3. Evaluate positioning relative to the line
         if ((leftInner > LINE_THRESHOLD && middle > LINE_THRESHOLD) || (middle > LINE_THRESHOLD && rightInner > LINE_THRESHOLD)) {
           // Centered perfectly on line -> Drive Straight
-          setMotors(HIGH, BASE_SPEED, HIGH, BASE_SPEED);
+          setMotors(HIGH, BASE_SPEED-30, HIGH, BASE_SPEED-30);
         } else if (leftInner > LINE_THRESHOLD) {
           // Drifting right -> Steer slightly left
           setMotors(HIGH, BASE_SPEED - 80, HIGH, BASE_SPEED + 40);
@@ -168,12 +168,12 @@ void bypassObstacle(boolean goLeft) {
     lastDevi = NONE;
     motorsStop();
     delay(2000);
-    setMotors(LOW, TURN_SPEED, HIGH, TURN_SPEED);
+    setMotors(LOW, TURN_SPEED-5, HIGH, TURN_SPEED-5);
     delay(2000);
     setMotors(HIGH, 130, HIGH, 130);
-    delay(1500);
-    setMotors(HIGH, TURN_SPEED, LOW, TURN_SPEED);
     delay(2000);
+    setMotors(HIGH, TURN_SPEED+10, LOW, TURN_SPEED+10);
+    delay(3000);
 
   }
 }
