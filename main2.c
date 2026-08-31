@@ -20,13 +20,14 @@ uint16_t sensorValues[SensorCount];
 const int LINE_THRESHOLD = 750;  // Analog values > 500 mean black line
 const int BASE_SPEED = 130;      // Base motor speed (0-255)
 const int TURN_SPEED = 210;      // Speed during sharp pivot turns
-const int PROXIMITY_LIMIT = 30; // Stop distance in centimeters
-const int MIN_DISTANCE = 10;  
+const int PROXIMITY_LIMIT = 30;  // Stop distance in centimeters
+const int MIN_DISTANCE = 10;
 
 // Robot System States
 enum RobotState {
   LINE_FOLLOWING,
   OBSTACLE_CHECK,
+  STOP,
 };
 
 RobotState currentState = LINE_FOLLOWING;
@@ -39,10 +40,15 @@ enum LastDevi {
 
 LastDevi lastDevi = NONE;
 
+bool backwards = false;
+
+int command = 1;
+int check = 1;
+
 
 void setup() {
 
-  //Serial.begin(9600);
+  Serial.begin(115200);
 
   qtr.setTypeRC();
   qtr.setSensorPins((const uint8_t[]){ A1, A2, A3, A4, A5 }, SensorCount);
@@ -93,6 +99,7 @@ void loop() {
 
     case LINE_FOLLOWING:
       {
+        Serial.println("wroom");
         // 1. Scan for upfront blockages
         int forwardDist = getDistance();
         if (forwardDist > MIN_DISTANCE && forwardDist < PROXIMITY_LIMIT) {
@@ -113,7 +120,7 @@ void loop() {
         // 3. Evaluate positioning relative to the line
         if ((leftInner > LINE_THRESHOLD && middle > LINE_THRESHOLD) || (middle > LINE_THRESHOLD && rightInner > LINE_THRESHOLD)) {
           // Centered perfectly on line -> Drive Straight
-          setMotors(HIGH, BASE_SPEED-30, HIGH, BASE_SPEED-30);
+          setMotors(HIGH, BASE_SPEED - 30, HIGH, BASE_SPEED - 30);
         } else if (leftInner > LINE_THRESHOLD) {
           // Drifting right -> Steer slightly left
           setMotors(HIGH, BASE_SPEED - 80, HIGH, BASE_SPEED + 40);
@@ -143,8 +150,40 @@ void loop() {
         currentState = LINE_FOLLOWING;  // Reset back to track finding
         break;
       }
+    case STOP:
+      {
+        Serial.println("ZZZ");
+        motorsStop();
+        delay(1000);
+      }
+  }
+  if (Serial.available() > 0) {
+    // Read the incoming integer value from your app
+    int newValue = Serial.parseInt();
+
+    // Update your running variable instantly
+    if (newValue != 0) {
+      command = newValue;
+    }
   }
   delay(20);  // Small loop stabilization tick
+  Serial.println(command);
+  Serial.println(check);
+  if (command != check) {
+    if (command == 1) {
+      currentState = LINE_FOLLOWING;
+    }
+    if (command == 2) {
+      currentState = STOP;
+    }
+    if (command == 3) {
+      backwards = false;
+    }
+    if (command == 4) {
+      backwards = true;
+    }
+    check = command;
+  }
 }
 
 // --- NAVIGATION UTILITY FUNCTIONS ---
@@ -168,13 +207,12 @@ void bypassObstacle(boolean goLeft) {
     lastDevi = NONE;
     motorsStop();
     delay(2000);
-    setMotors(LOW, TURN_SPEED-5, HIGH, TURN_SPEED-5);
+    setMotors(LOW, TURN_SPEED - 5, HIGH, TURN_SPEED - 5);
     delay(2000);
     setMotors(HIGH, 130, HIGH, 130);
     delay(2000);
-    setMotors(HIGH, TURN_SPEED+10, LOW, TURN_SPEED+10);
+    setMotors(HIGH, TURN_SPEED + 10, LOW, TURN_SPEED + 10);
     delay(3000);
-
   }
 }
 
