@@ -14,7 +14,7 @@ const int echoPin = 12;    // Connected to URM37 ECHO
 
 QTRSensors qtr;
 
-const uint8_t SensorCount = 5;
+const uint8_t SensorCount = 6;
 uint16_t sensorValues[SensorCount];
 
 // --- CALIBRATION & THRESHOLDS ---
@@ -52,7 +52,7 @@ void setup() {
   Serial.begin(115200);
 
   qtr.setTypeRC();
-  qtr.setSensorPins((const uint8_t[]){ A1, A2, A3, A4, A5 }, SensorCount);
+  qtr.setSensorPins((const uint8_t[]){ A0, A1, A2, A3, A4, A5 }, SensorCount);
   qtr.setEmitterPin(2);
 
   delay(500);
@@ -114,33 +114,65 @@ void loop() {
         // 2. Read central 4 sensors of QTR-8 for navigation guidance
         int leftOuter = sensorValues[0];
         int leftInner = sensorValues[1];
-        int middle = sensorValues[2];
-        int rightInner = sensorValues[3];
-        int rightOuter = sensorValues[4];
+        int middleLeft = sensorValues[2];
+        int middleRight = sensorValues[3];
+        int rightInner = sensorValues[4];
+        int rightOuter = sensorValues[5];
+
+        for (uint8_t i = 0; i < SensorCount; i++) {
+          Serial.print(sensorValues[i]);
+          Serial.print('\t');
+        }
 
         // 3. Evaluate positioning relative to the line
-        if ((leftInner > LINE_THRESHOLD && middle > LINE_THRESHOLD) || (middle > LINE_THRESHOLD && rightInner > LINE_THRESHOLD)) {
-          // Centered perfectly on line -> Drive Straight
-          setMotors(HIGH, BASE_SPEED - 30, HIGH, BASE_SPEED - 30);
-        } else if (leftInner > LINE_THRESHOLD) {
-          // Drifting right -> Steer slightly left
-          setMotors(HIGH, BASE_SPEED - 80, HIGH, BASE_SPEED + 40);
-          lastDevi = NONE;
-        } else if (rightInner > LINE_THRESHOLD) {
-          // Drifting left -> Steer slightly right
-          setMotors(HIGH, BASE_SPEED + 20, HIGH, BASE_SPEED - 80);
-          lastDevi = NONE;
-        } else if ((leftOuter > LINE_THRESHOLD) || lastDevi == LEFT) {
-          // Sharp left departure -> Sharp pivot left
-          setMotors(LOW, TURN_SPEED, HIGH, TURN_SPEED);
-          lastDevi = LEFT;
-        } else if ((rightOuter > LINE_THRESHOLD) || lastDevi == RIGHT) {
-          // Sharp right departure -> Sharp pivot right
-          setMotors(HIGH, TURN_SPEED, LOW, TURN_SPEED);
-          lastDevi = RIGHT;
+        if (backwards != true) {
+          if ((leftInner > LINE_THRESHOLD && middleLeft > LINE_THRESHOLD) || (middleRight > LINE_THRESHOLD && rightInner > LINE_THRESHOLD) || (middleRight > LINE_THRESHOLD && middleLeft > LINE_THRESHOLD)) {
+            // Centered perfectly on line -> Drive Straight
+            setMotors(HIGH, BASE_SPEED - 30, HIGH, BASE_SPEED - 30);
+          } else if (leftInner > LINE_THRESHOLD) {
+            // Drifting right -> Steer slightly left
+            setMotors(HIGH, BASE_SPEED - 80, HIGH, BASE_SPEED + 40);
+            lastDevi = NONE;
+          } else if (rightInner > LINE_THRESHOLD) {
+            // Drifting left -> Steer slightly right
+            setMotors(HIGH, BASE_SPEED + 20, HIGH, BASE_SPEED - 80);
+            lastDevi = NONE;
+          } else if ((leftOuter > LINE_THRESHOLD) || lastDevi == LEFT) {
+            // Sharp left departure -> Sharp pivot left
+            setMotors(LOW, TURN_SPEED, HIGH, TURN_SPEED);
+            lastDevi = LEFT;
+          } else if ((rightOuter > LINE_THRESHOLD) || lastDevi == RIGHT) {
+            // Sharp right departure -> Sharp pivot right
+            setMotors(HIGH, TURN_SPEED, LOW, TURN_SPEED);
+            lastDevi = RIGHT;
+          } else {
+            // Lost line completely -> Creep forward slowly to reacquire
+            setMotors(HIGH, 130, HIGH, 130);
+          }
         } else {
-          // Lost line completely -> Creep forward slowly to reacquire
-          setMotors(HIGH, 130, HIGH, 130);
+          if ((leftInner > LINE_THRESHOLD && middleLeft > LINE_THRESHOLD) || (middleRight > LINE_THRESHOLD && rightInner > LINE_THRESHOLD) || (middleRight > LINE_THRESHOLD && middleLeft > LINE_THRESHOLD)) {
+            // Centered perfectly on line -> Drive Straight
+            setMotors(LOW, BASE_SPEED - 30, LOW, BASE_SPEED - 30);
+          } else if (leftInner > LINE_THRESHOLD) {
+            // Drifting right -> Steer slightly left
+            setMotors(LOW, BASE_SPEED + 40, LOW, BASE_SPEED - 80);
+            lastDevi = NONE;
+          } else if (rightInner > LINE_THRESHOLD) {
+            // Drifting left -> Steer slightly right
+            setMotors(LOW, BASE_SPEED - 80, LOW, BASE_SPEED + 40);
+            lastDevi = NONE;
+          } else if ((leftOuter > LINE_THRESHOLD) || lastDevi == LEFT) {
+            // Sharp left departure -> Sharp pivot left
+            setMotors(LOW, TURN_SPEED, HIGH, TURN_SPEED);
+            lastDevi = LEFT;
+          } else if ((rightOuter > LINE_THRESHOLD) || lastDevi == RIGHT) {
+            // Sharp right departure -> Sharp pivot right
+            setMotors(HIGH, TURN_SPEED, LOW, TURN_SPEED);
+            lastDevi = RIGHT;
+          } else {
+            // Lost line completely -> Creep forward slowly to reacquire
+            setMotors(LOW, 130, LOW, 130);
+          }
         }
         break;
       }
@@ -191,27 +223,10 @@ void loop() {
 
 // Helper function to commit wheel states cleanly
 void setMotors(int leftDir, int leftSpeed, int rightDir, int rightSpeed) {
-  if (backwards != true) {
-    digitalWrite(M1, leftDir);
-    analogWrite(E1, leftSpeed);
-    digitalWrite(M2, rightDir);
-    analogWrite(E2, rightSpeed);
-  } else {
-    if (leftDir == LOW) {
-      leftDir = HIGH;
-    } else {
-      leftDir = LOW;
-    }
-    if (rightDir == LOW) {
-      rightDir = HIGH;
-    } else {
-      rightDir = LOW;
-    }
-    digitalWrite(M1, leftDir);
-    analogWrite(E1, leftSpeed);
-    digitalWrite(M2, rightDir);
-    analogWrite(E2, rightSpeed);
-  }
+  digitalWrite(M1, leftDir);
+  analogWrite(E1, leftSpeed);
+  digitalWrite(M2, rightDir);
+  analogWrite(E2, rightSpeed);
 }
 
 void motorsStop() {
