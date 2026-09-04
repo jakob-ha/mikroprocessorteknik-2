@@ -1,3 +1,4 @@
+
 #include <QTRSensors.h>
 
 // --- PIN CONFIGURATION ---
@@ -190,10 +191,27 @@ void loop() {
 
 // Helper function to commit wheel states cleanly
 void setMotors(int leftDir, int leftSpeed, int rightDir, int rightSpeed) {
-  digitalWrite(M1, leftDir);
-  analogWrite(E1, leftSpeed);
-  digitalWrite(M2, rightDir);
-  analogWrite(E2, rightSpeed);
+  if (backwards != true) {
+    digitalWrite(M1, leftDir);
+    analogWrite(E1, leftSpeed);
+    digitalWrite(M2, rightDir);
+    analogWrite(E2, rightSpeed);
+  } else {
+    if (leftDir == LOW) {
+      leftDir = HIGH;
+    } else {
+      leftDir = LOW;
+    }
+    if (rightDir == LOW) {
+      rightDir = HIGH;
+    } else {
+      rightDir = LOW;
+    }
+    digitalWrite(M1, leftDir);
+    analogWrite(E1, leftSpeed);
+    digitalWrite(M2, rightDir);
+    analogWrite(E2, rightSpeed);
+  }
 }
 
 void motorsStop() {
