@@ -3,69 +3,90 @@
 
 // --- PIN CONFIGURATION ---
 // Romeo BLE Built-in Motor Driver Pins
-const int E1 = 5;     // M1 Speed Control (Left Motors)
-const int M1 = 4;     // M1 Direction Control
-const int E2 = 6;     // M2 Speed Control (Right Motors)
-const int M2 = 7;     // M2 Direction Control
+const int E1 = 6;
+const int M1 = 7;
+const int E2 = 5;
+const int M2 = 4;
 
 // Peripheral Component Pins
-const int SERVO_PIN = 10;   // DSS-P05 Servo Signal Pin
-const int triggerPin = 9; // Connected to URM37 COMP/TRIG
-const int echoPin = 12;    // Connected to URM37 ECHO
+const int TRIG_PIN = 9;
+const int ECHO_PIN = 12;
+const int SERVO_PIN = 10;  //????????????????????????????????????????????????
 
-Servo myServo;
 QTRSensors qtr;
+Servo myservo;
 
-const uint8_t SensorCount = 5;
+const uint8_t SensorCount = 6;
 uint16_t sensorValues[SensorCount];
 
 // --- CALIBRATION & THRESHOLDS ---
-const int LINE_THRESHOLD = 750;  // Analog values > 500 mean black line
-const int BASE_SPEED = 130;      // Base motor speed (0-255)
-const int TURN_SPEED = 90;       // Speed during sharp pivot turns
-const int PROXIMITY_LIMIT = 20;  // Stop distance in centimeters
+const int MAX_SPEED = 255;
+const float PROXIMITY_LIMIT = 15.0;
+const float MIN_DISTANCE = 5.0;
+const int SERVO_FRONT = 90;   //??????????????????????????????????????????
+const int SERVO_RIGHT = 180;  //??????????????????????????????????????????
+const int MAX_POS = 1000 * SensorCount;
 
 // Robot System States
 enum RobotState {
   LINE_FOLLOWING,
-  OBSTACLE_CHECK,
-  BYPASS_MANEUVER
+  OBSTACLE_CIRCUMVENTION_START,
+  OBSTACLE_CIRCUMVENTION,
+  OBSTACLE_CIRCUMVENTION_END,
+  STOP,
+  BACKWARDS,
 };
 
 RobotState currentState = LINE_FOLLOWING;
 
+bool backwards = false;
+
+int command = 1;
+int check = 1;
+
+int currentSpeed = MAX_SPEED;
+
+float lastDistance = 20.0;
+
+bool progressCheck = false;
+bool progressCheckNumber = 0;
+
+// --- PD Gains (Tune these!) ---
+float Kp = 5.0;  // Proportional gain
+float Kd = 3.0;  // Derivative gain
+
+// --- Variables ---
+float lastError = 0;
+
+uint16_t lastPosition = MAX_POS / 2;
+uint16_t position = MAX_POS / 2;
 
 void setup() {
 
-  Serial.begin(9600);
-  
+  Serial.begin(115200);
+
+  myservo.attach(SERVO_PIN);
+
   qtr.setTypeRC();
-  qtr.setSensorPins((const uint8_t[]){A1 ,A2 ,A3, A4, A5}, SensorCount);
+  qtr.setSensorPins((const uint8_t[]){ A0, A1, A2, A3, A4, A5 }, SensorCount);
   qtr.setEmitterPin(2);
-
   delay(500);
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, HIGH); // turn on Arduino's LED to indicate we are in calibration mode
 
-  // 2.5 ms RC read timeout (default) * 10 reads per calibrate() call
-  // = ~25 ms per calibrate() call.
-  // Call calibrate() 400 times to make calibration take about 10 seconds.
-  for (uint16_t i = 0; i < 400; i++)
-  {
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
+  for (uint16_t i = 0; i < 400; i++) {
     qtr.calibrate();
   }
   digitalWrite(LED_BUILTIN, LOW);
 
-  for (uint8_t i = 0; i < SensorCount; i++)
-  {
+  for (uint8_t i = 0; i < SensorCount; i++) {
     Serial.print(qtr.calibrationOn.minimum[i]);
     Serial.print(' ');
   }
   Serial.println();
 
   // print the calibration maximum values measured when emitters were on
-  for (uint8_t i = 0; i < SensorCount; i++)
-  {
+  for (uint8_t i = 0; i < SensorCount; i++) {
     Serial.print(qtr.calibrationOn.maximum[i]);
     Serial.print(' ');
   }
@@ -73,99 +94,127 @@ void setup() {
   Serial.println();
   delay(1000);
 
-  // Setup Pins
   pinMode(M1, OUTPUT);
   pinMode(M2, OUTPUT);
   pinMode(E1, OUTPUT);
   pinMode(E2, OUTPUT);
-  pinMode(triggerPin, OUTPUT);
-  pinMode(echoPin, INPUT);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
 
-  digitalWrite(triggerPin, HIGH);
+  digitalWrite(TRIG_PIN, HIGH);
 
-  
-  // Setup Servo
-  myServo.attach(SERVO_PIN);
-  myServo.write(90); // Center the ultrasonic sensor straight ahead
-    
-  delay(1000); // System safety settle time
+  delay(1000);  // System safety settle time
 }
 
 void loop() {
   switch (currentState) {
-    
-    case LINE_FOLLOWING: {
-      // 1. Scan for upfront blockages
-      int forwardDist = getDistance();
-      if (forwardDist > 0 && forwardDist < PROXIMITY_LIMIT) {
-        motorsStop();
-        currentState = OBSTACLE_CHECK;
+
+    case LINE_FOLLOWING:
+      {
+        float forwardDist = getDistance();
+        if (forwardDist > MIN_DISTANCE && forwardDist < PROXIMITY_LIMIT) {
+          motorsStop();
+          myservo.write(SERVO_RIGHT);
+          delay(1000);
+          setMotors(LOW, currentSpeed, HIGH, currentSpeed);
+          progressCheckNumber = 0;
+          currentState = OBSTACLE_CIRCUMVENTION_START;
+          break;
+        }
+
+        position = qtr.readLineBlack(sensorValues);
+        Serial.println(position);
+
+        positionDrive(position);
+
         break;
       }
-      
-      uint16_t position = qtr.readLineBlack(sensorValues);
+    case OBSTACLE_CIRCUMVENTION_START:
+      {
+        float distance = getDistance();
+        if (distance > lastDistance) { progressCheckNumber++; }
+        if (progressCheckNumber > 3) { currentState = OBSTACLE_CIRCUMVENTION; 
+        progressCheckNumber = 0;}
+        break;
+      }
+    case OBSTACLE_CIRCUMVENTION:
+      {
+        float currentDist = getDistance();
 
-      // 2. Read central 4 sensors of QTR-8 for navigation guidance
-      int leftOuter  = sensorValues[0];
-      int leftInner  = sensorValues[1];
-      int rightInner = sensorValues[2];
-      int rightOuter = sensorValues[3];
-      
-      // 3. Evaluate positioning relative to the line
-      if (leftInner > LINE_THRESHOLD && rightInner > LINE_THRESHOLD) {
-        // Centered perfectly on line -> Drive Straight
-        setMotors(HIGH, BASE_SPEED, HIGH, BASE_SPEED);
-      } 
-      else if (leftInner > LINE_THRESHOLD) {
-        // Drifting right -> Steer slightly left
-        setMotors(HIGH, BASE_SPEED - 40, HIGH, BASE_SPEED + 20);
-      } 
-      else if (rightInner > LINE_THRESHOLD) {
-        // Drifting left -> Steer slightly right
-        setMotors(HIGH, BASE_SPEED + 20, HIGH, BASE_SPEED - 40);
-      }   
-      else if (leftOuter > LINE_THRESHOLD) {
-        // Sharp left departure -> Sharp pivot left
-        setMotors(LOW, TURN_SPEED, HIGH, TURN_SPEED);
-      } 
-      else if (rightOuter > LINE_THRESHOLD) {
-        // Sharp right departure -> Sharp pivot right
-        setMotors(HIGH, TURN_SPEED, LOW, TURN_SPEED);
-      }
-      else {
-        // Lost line completely -> Creep forward slowly to reacquire
-        setMotors(HIGH, 80, HIGH, 80);
-      }
-      break;
-    }
+        // Calculate how far off we are (Error)
+        // Assumes sensor is on the LEFT side.
+        // If too close, error is negative. If too far, error is positive.
+        float error = currentDist - PROXIMITY_LIMIT;
 
-    case OBSTACLE_CHECK: {
-      // Look left
-      myServo.write(30);
-      delay(500);
-      int leftDist = getDistance();
-      
-      // Look right
-      myServo.write(150);
-      delay(500);
-      int rightDist = getDistance();
-      
-      // Return sensor to front index
-      myServo.write(90);
-      delay(300);
-      
-      // Decision Logic: Maneuver to the side with more clearance
-      if (leftDist > rightDist) {
-        bypassObstacle(true);  // Circumvent via the left side
-      } else {
-        bypassObstacle(false); // Circumvent via the right side
+        // Calculate derivative (rate of change)
+        float derivative = error - lastError;
+
+        // Calculate the steering correction
+        float correction = (Kp * error) + (Kd * derivative);
+
+        // Constraint correction to prevent motor errors
+        correction = constrain(correction, -100, 100);
+
+        uint8_t posSubstitute = (correction + 100) * 30;
+
+        positionDrive(posSubstitute);
+
+        lastError = error;
+
+        lastPosition = position;
+        position = qtr.readLineBlack(sensorValues);
+        if (position != lastPosition){progressCheckNumber++;}
+        if (progressCheckNumber > 3)
+        {currentState = OBSTACLE_CIRCUMVENTION_END;
+        progressCheckNumber = 0;}
+        break;
       }
-      
-      currentState = LINE_FOLLOWING; // Reset back to track finding
-      break;
+    case OBSTACLE_CIRCUMVENTION_END:
+      {
+        myservo.write(SERVO_FRONT);
+        delay(1000);
+        setMotors(LOW, currentSpeed, HIGH, currentSpeed);
+        delay(1000);
+        currentState = LINE_FOLLOWING;
+        break;
+      }
+    case STOP:
+      {
+        motorsStop();
+        delay(1000);
+        break;
+      }
+    case BACKWARDS:
+      {
+        setMotors(LOW, currentSpeed, LOW, currentSpeed);
+        delay(2000);
+        currentState = STOP;
+        command = 2;
+        check = 2;
+        break;
+      }
+  }
+
+  if (Serial.available() > 0) {
+    int newValue = Serial.parseInt();
+    if (newValue != 0) {
+      command = newValue;
     }
   }
-  delay(20); // Small loop stabilization tick
+  delay(20);  // Small loop stabilization tick
+
+  if (command != check) {
+    if (command == 1) {
+      currentState = LINE_FOLLOWING;
+    }
+    if (command == 2) {
+      currentState = STOP;
+    }
+    if (command == 3) {
+      currentState = BACKWARDS;
+    }
+    check = command;
+  }
 }
 
 // --- NAVIGATION UTILITY FUNCTIONS ---
@@ -183,48 +232,40 @@ void motorsStop() {
   analogWrite(E2, 0);
 }
 
-// Executes a timed dead-reckoning curve around the object to find the line again
-void bypassObstacle(boolean goLeft) {
-  if (goLeft) {
-    // 1. Pivot Left away from obstacle
-    setMotors(LOW, TURN_SPEED, HIGH, TURN_SPEED);  delay(600);
-    // 2. Arc Forward around the obstacle
-    setMotors(HIGH, BASE_SPEED + 30, HIGH, BASE_SPEED - 30); delay(1200);
-    // 3. Pivot Right back towards original vector
-    setMotors(HIGH, TURN_SPEED, LOW, TURN_SPEED);  delay(600);
-  } else {
-    // 1. Pivot Right away from obstacle
-    setMotors(HIGH, TURN_SPEED, LOW, TURN_SPEED);  delay(600);
-    // 2. Arc Forward around the obstacle
-    setMotors(HIGH, BASE_SPEED - 30, HIGH, BASE_SPEED + 30); delay(1200);
-    // 3. Pivot Left back towards original vector
-    setMotors(LOW, TURN_SPEED, HIGH, TURN_SPEED);  delay(600);
+void positionDrive(int position) {
+  if (position == (MAX_POS / 2)) {
+    setMotors(HIGH, currentSpeed, HIGH, currentSpeed);
   }
-  motorsStop();
-  delay(200);
+
+  if (position < (MAX_POS / 4)) {
+    setMotors(HIGH, currentSpeed, LOW, (currentSpeed * ((MAX_POS / 4) - position)) / (MAX_POS / 4));
+  }
+
+  if (position > ((3 * MAX_POS) / 4)) {
+    setMotors(LOW, (currentSpeed * (position - (3 * MAX_POS) / 4)) / (MAX_POS / 4), HIGH, currentSpeed);
+  }
+
+  if (position < (MAX_POS / 2)) {
+    setMotors(HIGH, currentSpeed, HIGH, currentSpeed - ((currentSpeed * ((MAX_POS / 2) - position)) / (MAX_POS / 4)));
+  }
+
+  if (position > (MAX_POS / 2)) {
+    setMotors(HIGH, currentSpeed - ((currentSpeed * (position - (MAX_POS / 2))) / (MAX_POS / 4)), HIGH, currentSpeed);
+  }
 }
 
 // --- SENSOR READING UTILITY FUNCTIONS ---
 
-int getDistance() {
-  // Clear lingering data from software serial rx buffer
-  digitalWrite(triggerPin, LOW);
-  delayMicroseconds(10); 
-  digitalWrite(triggerPin, HIGH);
-  
-  // Measure the duration of the low pulse returned by the ECHO pin
-  // URM37 outputs a low pulse proportional to distance: 50us per centimeter
-  unsigned long duration = pulseIn(echoPin, LOW, 30000); // 30ms timeout
-  
-  if (duration == 0) {
-    Serial.println("Error: No pulse detected / Out of range");
-  } else {
-    // Calculate distance in centimeters
-    unsigned long distance = duration / 50; 
-    
-    Serial.print("Distance: ");
-    Serial.print(distance);
-    Serial.println(" cm");
-  
-  return distance;
+float getDistance() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000);  // 30ms timeout
+  if (duration == 0) return lastDistance;          // Ignore timeouts to prevent wild jumps
+
+  lastDistance = duration * 0.0343 / 2;
+  return duration * 0.0343 / 2;
 }
