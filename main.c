@@ -11,7 +11,9 @@ const int M2 = 4;
 // Peripheral Component Pins
 const int TRIG_PIN = 9;
 const int ECHO_PIN = 12;
-const int SERVO_PIN = 10;  //????????????????????????????????????????????????
+const int SERVO_PIN = 10;
+int SENSOR_PIN = A7;
+
 
 QTRSensors qtr;
 Servo myservo;
@@ -23,9 +25,9 @@ uint16_t sensorValues[SensorCount];
 const int MAX_SPEED = 255;
 const float PROXIMITY_LIMIT = 15.0;
 const float MIN_DISTANCE = 5.0;
-const int SERVO_FRONT = 90;   //??????????????????????????????????????????
-const int SERVO_RIGHT = 180;  //??????????????????????????????????????????
-const int MAX_POS = 1000 * SensorCount;
+const int SERVO_FRONT = 90;  //??????????????????????????????????????????
+const int SERVO_RIGHT = 0;   //??????????????????????????????????????????
+const int MAX_POS = 1000 * (SensorCount - 1);
 
 // Robot System States
 enum RobotState {
@@ -46,7 +48,9 @@ int check = 1;
 
 int currentSpeed = MAX_SPEED;
 
+float distance = 20.0;
 float lastDistance = 20.0;
+
 
 bool progressCheck = false;
 bool progressCheckNumber = 0;
@@ -103,6 +107,8 @@ void setup() {
 
   digitalWrite(TRIG_PIN, HIGH);
 
+  currentSpeed = 150;
+
   delay(1000);  // System safety settle time
 }
 
@@ -111,6 +117,7 @@ void loop() {
 
     case LINE_FOLLOWING:
       {
+        Serial.print("LINE_FOLLOWING:");
         float forwardDist = getDistance();
         if (forwardDist > MIN_DISTANCE && forwardDist < PROXIMITY_LIMIT) {
           motorsStop();
@@ -123,6 +130,10 @@ void loop() {
         }
 
         position = qtr.readLineBlack(sensorValues);
+        for (uint8_t i = 0; i < SensorCount; i++) {
+          Serial.print(sensorValues[i]);
+          Serial.print('\t');
+        }
         Serial.println(position);
 
         positionDrive(position);
@@ -131,14 +142,17 @@ void loop() {
       }
     case OBSTACLE_CIRCUMVENTION_START:
       {
-        float distance = getDistance();
-        if (distance > lastDistance) { progressCheckNumber++; }
-        if (progressCheckNumber > 3) { currentState = OBSTACLE_CIRCUMVENTION; 
-        progressCheckNumber = 0;}
+        Serial.print("OBSTACLE_CIRCUMVENTION_START:");
+        distance = getDistance();
+        delay(10);
+        if (distance < 30.0) {
+          currentState = OBSTACLE_CIRCUMVENTION;
+        }
         break;
       }
     case OBSTACLE_CIRCUMVENTION:
       {
+        Serial.print("OBSTACLE_CIRCUMVENTION:");
         float currentDist = getDistance();
 
         // Calculate how far off we are (Error)
@@ -155,37 +169,45 @@ void loop() {
         // Constraint correction to prevent motor errors
         correction = constrain(correction, -100, 100);
 
-        uint8_t posSubstitute = (correction + 100) * 30;
+        int posSubstitute = (correction + 100) * 25;
 
+        Serial.print("PosSubstitute:");
+        Serial.print(posSubstitute);
+        Serial.print("\n");
         positionDrive(posSubstitute);
 
         lastError = error;
 
-        lastPosition = position;
         position = qtr.readLineBlack(sensorValues);
-        if (position != lastPosition){progressCheckNumber++;}
-        if (progressCheckNumber > 3)
-        {currentState = OBSTACLE_CIRCUMVENTION_END;
-        progressCheckNumber = 0;}
+        for (uint8_t i = 0; i < SensorCount; i++) {
+
+          if (sensorValues[i] > 500) {
+            currentState = OBSTACLE_CIRCUMVENTION_END;
+          }
+        }
+
         break;
       }
     case OBSTACLE_CIRCUMVENTION_END:
       {
+        Serial.print("OBSTACLE_CIRCUMVENTION_END:");
         myservo.write(SERVO_FRONT);
         delay(1000);
         setMotors(LOW, currentSpeed, HIGH, currentSpeed);
-        delay(1000);
+        delay(1500);
         currentState = LINE_FOLLOWING;
         break;
       }
     case STOP:
       {
+        Serial.print("STOP:");
         motorsStop();
         delay(1000);
         break;
       }
     case BACKWARDS:
       {
+        Serial.print("BACKWARDS:");
         setMotors(LOW, currentSpeed, LOW, currentSpeed);
         delay(2000);
         currentState = STOP;
@@ -201,7 +223,7 @@ void loop() {
       command = newValue;
     }
   }
-  delay(20);  // Small loop stabilization tick
+  delay(25);  // Small loop stabilization tick
 
   if (command != check) {
     if (command == 1) {
@@ -233,24 +255,36 @@ void motorsStop() {
 }
 
 void positionDrive(int position) {
+  // Ensure MAX_POS_F is treated as a float to force floating-point math
+  float max_pos_f = (float)MAX_POS;
+  float current_speed_f = (float)currentSpeed;
+
   if (position == (MAX_POS / 2)) {
     setMotors(HIGH, currentSpeed, HIGH, currentSpeed);
   }
 
-  if (position < (MAX_POS / 4)) {
-    setMotors(HIGH, currentSpeed, LOW, (currentSpeed * ((MAX_POS / 4) - position)) / (MAX_POS / 4));
+  else if (position < (MAX_POS / 4)) {
+    // Calculates: currentSpeed * ((MAX_POS/4) - position) / (MAX_POS/4)
+    float targetSpeed = (current_speed_f * ((max_pos_f / 4.0f) - position)) / (max_pos_f / 4.0f);
+    setMotors(LOW, (int)targetSpeed, HIGH, currentSpeed);
   }
 
-  if (position > ((3 * MAX_POS) / 4)) {
-    setMotors(LOW, (currentSpeed * (position - (3 * MAX_POS) / 4)) / (MAX_POS / 4), HIGH, currentSpeed);
+  else if (position > ((3 * MAX_POS) / 4)) {
+    // Calculates: currentSpeed * (position - (3*MAX_POS/4)) / (MAX_POS/4)
+    float targetSpeed = (current_speed_f * (position - (3.0f * max_pos_f / 4.0f))) / (max_pos_f / 4.0f);
+    setMotors(HIGH, currentSpeed, LOW, (int)targetSpeed);
   }
 
-  if (position < (MAX_POS / 2)) {
-    setMotors(HIGH, currentSpeed, HIGH, currentSpeed - ((currentSpeed * ((MAX_POS / 2) - position)) / (MAX_POS / 4)));
+  else if (position < (MAX_POS / 2)) {
+    // Calculates: currentSpeed - (currentSpeed * ((MAX_POS/2) - position) / (MAX_POS/4))
+    float targetSpeed = current_speed_f - ((current_speed_f * ((max_pos_f / 2.0f) - position)) / (max_pos_f / 4.0f));
+    setMotors(HIGH, (int)targetSpeed, HIGH, currentSpeed);
   }
 
-  if (position > (MAX_POS / 2)) {
-    setMotors(HIGH, currentSpeed - ((currentSpeed * (position - (MAX_POS / 2))) / (MAX_POS / 4)), HIGH, currentSpeed);
+  else if (position > (MAX_POS / 2)) {
+    // Calculates: currentSpeed - (currentSpeed * (position - (MAX_POS/2)) / (MAX_POS/4))
+    float targetSpeed = current_speed_f - ((current_speed_f * (position - (max_pos_f / 2.0f))) / (max_pos_f / 4.0f));
+    setMotors(HIGH, currentSpeed, HIGH, (int)targetSpeed);
   }
 }
 
@@ -258,14 +292,13 @@ void positionDrive(int position) {
 
 float getDistance() {
   digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000);  // 30ms timeout
-  if (duration == 0) return lastDistance;          // Ignore timeouts to prevent wild jumps
-
-  lastDistance = duration * 0.0343 / 2;
-  return duration * 0.0343 / 2;
+  unsigned long LowLevelTime = pulseIn(ECHO_PIN, LOW);
+  float lowLevelTime = (float)LowLevelTime;
+  if (lowLevelTime >= 50000) {
+    Serial.println("Out of Range");
+    return lastDistance;
+  }
+  lastDistance = lowLevelTime / 50;
+  return lowLevelTime / 50;
 }
