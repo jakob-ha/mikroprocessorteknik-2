@@ -12,7 +12,8 @@ const int M2 = 4;
 const int TRIG_PIN = 9;
 const int ECHO_PIN = 12;
 const int SERVO_PIN = 10;
-int SENSOR_PIN = A7;
+const int BUTTON_PIN = A7;
+
 
 
 QTRSensors qtr;
@@ -223,6 +224,15 @@ void loop() {
       command = newValue;
     }
   }
+
+  int buttonValue = analogRead(BUTTON_PIN);
+
+  if (buttonValue >= 125 && buttonValue <= 165) {
+    command = 1;
+  } else if (buttonValue >= 310 && buttonValue <= 350) {
+    command = 2;
+  }
+
   delay(25);  // Small loop stabilization tick
 
   if (command != check) {
