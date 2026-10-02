@@ -14,8 +14,6 @@ const int ECHO_PIN = 12;
 const int SERVO_PIN = 10;
 const int BUTTON_PIN = A7;
 
-
-
 QTRSensors qtr;
 Servo myservo;
 
@@ -26,11 +24,10 @@ uint16_t sensorValues[SensorCount];
 const int MAX_SPEED = 255;
 const float PROXIMITY_LIMIT = 15.0;
 const float MIN_DISTANCE = 5.0;
-const int SERVO_FRONT = 90;  //??????????????????????????????????????????
-const int SERVO_RIGHT = 0;   //??????????????????????????????????????????
+const int SERVO_FRONT = 90;
+const int SERVO_RIGHT = 0;
 const int MAX_POS = 1000 * (SensorCount - 1);
 
-// Robot System States
 enum RobotState {
   LINE_FOLLOWING,
   OBSTACLE_CIRCUMVENTION_START,
@@ -56,11 +53,9 @@ float lastDistance = 20.0;
 bool progressCheck = false;
 bool progressCheckNumber = 0;
 
-// --- PD Gains (Tune these!) ---
 float Kp = 5.0;  // Proportional gain
 float Kd = 3.0;  // Derivative gain
 
-// --- Variables ---
 float lastError = 0;
 
 uint16_t lastPosition = MAX_POS / 2;
@@ -156,18 +151,12 @@ void loop() {
         Serial.print("OBSTACLE_CIRCUMVENTION:");
         float currentDist = getDistance();
 
-        // Calculate how far off we are (Error)
-        // Assumes sensor is on the LEFT side.
-        // If too close, error is negative. If too far, error is positive.
         float error = currentDist - PROXIMITY_LIMIT;
 
-        // Calculate derivative (rate of change)
         float derivative = error - lastError;
 
-        // Calculate the steering correction
         float correction = (Kp * error) + (Kd * derivative);
 
-        // Constraint correction to prevent motor errors
         correction = constrain(correction, -100, 100);
 
         int posSubstitute = (correction + 100) * 25;
@@ -233,7 +222,7 @@ void loop() {
     command = 2;
   }
 
-  delay(25);  // Small loop stabilization tick
+  delay(25);
 
   if (command != check) {
     if (command == 1) {
@@ -249,9 +238,6 @@ void loop() {
   }
 }
 
-// --- NAVIGATION UTILITY FUNCTIONS ---
-
-// Helper function to commit wheel states cleanly
 void setMotors(int leftDir, int leftSpeed, int rightDir, int rightSpeed) {
   digitalWrite(M1, leftDir);
   analogWrite(E1, leftSpeed);
@@ -265,7 +251,6 @@ void motorsStop() {
 }
 
 void positionDrive(int position) {
-  // Ensure MAX_POS_F is treated as a float to force floating-point math
   float max_pos_f = (float)MAX_POS;
   float current_speed_f = (float)currentSpeed;
 
@@ -274,31 +259,25 @@ void positionDrive(int position) {
   }
 
   else if (position < (MAX_POS / 4)) {
-    // Calculates: currentSpeed * ((MAX_POS/4) - position) / (MAX_POS/4)
     float targetSpeed = (current_speed_f * ((max_pos_f / 4.0f) - position)) / (max_pos_f / 4.0f);
     setMotors(LOW, (int)targetSpeed, HIGH, currentSpeed);
   }
 
   else if (position > ((3 * MAX_POS) / 4)) {
-    // Calculates: currentSpeed * (position - (3*MAX_POS/4)) / (MAX_POS/4)
     float targetSpeed = (current_speed_f * (position - (3.0f * max_pos_f / 4.0f))) / (max_pos_f / 4.0f);
     setMotors(HIGH, currentSpeed, LOW, (int)targetSpeed);
   }
 
   else if (position < (MAX_POS / 2)) {
-    // Calculates: currentSpeed - (currentSpeed * ((MAX_POS/2) - position) / (MAX_POS/4))
     float targetSpeed = current_speed_f - ((current_speed_f * ((max_pos_f / 2.0f) - position)) / (max_pos_f / 4.0f));
     setMotors(HIGH, (int)targetSpeed, HIGH, currentSpeed);
   }
 
   else if (position > (MAX_POS / 2)) {
-    // Calculates: currentSpeed - (currentSpeed * (position - (MAX_POS/2)) / (MAX_POS/4))
     float targetSpeed = current_speed_f - ((current_speed_f * (position - (max_pos_f / 2.0f))) / (max_pos_f / 4.0f));
     setMotors(HIGH, currentSpeed, HIGH, (int)targetSpeed);
   }
 }
-
-// --- SENSOR READING UTILITY FUNCTIONS ---
 
 float getDistance() {
   digitalWrite(TRIG_PIN, LOW);
